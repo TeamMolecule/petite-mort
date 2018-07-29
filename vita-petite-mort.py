@@ -27,10 +27,10 @@ from chipwhisperer.capture.targets.simpleserial_readers.cwlite import SimpleSeri
 
 CW_SYSCLK_FREQ = 96000000
 VITA_CLK_FREQ = 12000000
-MIN_OFFSET = 40800
-MAX_OFFSET = 40900
-MIN_WIDTH = 55
-MAX_WIDTH = 65
+MIN_OFFSET = 40750
+MAX_OFFSET = 40850
+MIN_WIDTH = 40
+MAX_WIDTH = 70
 VITA_UART0_BAUD = 28985
 TIME_RESET_HOLD = 0
 TIME_POWER_HOLD = 5
@@ -120,8 +120,7 @@ scope.io.nrst = 'low'
 # clear buffer
 print('Clearing buffer...')
 while ser.inWaiting() > 0:
-    dat = ser.read(ser.inWaiting())
-    print(':'.join(y.encode('hex') for y in dat))
+    ser.read(ser.inWaiting())
 
 print('Starting glitch...')
 success = False
@@ -231,7 +230,8 @@ while timeout > 0:
         if f:
             f.write(dat)
             f.flush()
-        if len(queue) >= 16:
+            queue = []
+        elif len(queue) >= 16:
             print(hexdump(queue[0:16], offset), end="")
             queue = queue[16:]
             offset += 16
