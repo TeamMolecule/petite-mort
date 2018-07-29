@@ -228,8 +228,9 @@ while timeout > 0:
         timeout = PAYLOAD_TIMEOUT
         dat = ser.read(count, 0)
         queue.extend(dat)
-        f.write(dat)
-        f.flush()
+        if f:
+            f.write(dat)
+            f.flush()
         if len(queue) >= 16:
             print(hexdump(queue[0:16], offset), end="")
             queue = queue[16:]
