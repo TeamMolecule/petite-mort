@@ -27,10 +27,10 @@ from chipwhisperer.capture.targets.simpleserial_readers.cwlite import SimpleSeri
 
 CW_SYSCLK_FREQ = 96000000
 VITA_CLK_FREQ = 12000000
-MIN_OFFSET = 40750
-MAX_OFFSET = 40850
-MIN_WIDTH = 40
-MAX_WIDTH = 70
+MIN_OFFSET = 40800
+MAX_OFFSET = 40900
+MIN_WIDTH = 50
+MAX_WIDTH = 60
 VITA_UART0_BAUD = 28985
 TIME_RESET_HOLD = 0
 TIME_POWER_HOLD = 5
@@ -191,7 +191,7 @@ while not success:
                                     state = States.UNEXPECTED_READ
                             else:
                                 state = States.UNEXPECTED_PACKET
-                    if restarted > 10 or state == States.RESTARTED or state == States.SUCCESS:
+                    if restarted > 10 or state == States.RESTARTED:
                         timeout = -1
                         break
                 else:
@@ -230,19 +230,17 @@ while timeout > 0:
         if f:
             f.write(dat)
             f.flush()
-            queue = []
-        elif len(queue) >= 16:
+        if (not f or VERBOSE) and len(queue) >= 16:
             print(hexdump(queue[0:16], offset), end="")
             queue = queue[16:]
             offset += 16
         count = ser.inWaiting()
     else:
-        # Dump any remaining emmc traffic if seen
-        while VERBOSE and mmc.count() > 0:
-            pkt = mmc.read()
-            print(str(pkt))
         time.sleep(0.1)
         timeout -= 1
+    while VERBOSE and mmc.count() > 0:
+        pkt = mmc.read()
+        print(str(pkt))
 
 if f:
     f.close()
