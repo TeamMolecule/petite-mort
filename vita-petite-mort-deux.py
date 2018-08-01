@@ -43,6 +43,7 @@ VITA_UART0_BAUD = 28985
 TIME_RESET_HOLD = 0
 TIME_POWER_HOLD = 5
 GLITCH_FIND_TIMEOUT = 10
+TRIGGER_PAYLOAD_TRIES = 10
 PAYLOAD_TIMEOUT = 100
 VERBOSE = 1
 
@@ -289,16 +290,20 @@ class PetiteMort:
                 scope.io.nrst = 'low'
                 scope.vddglitch.repeat = width
                 print('Clearing buffer...')
-                while ser.inWaiting() > 0:
-                    ser.read(ser.inWaiting())
+                ser.flushInput()
                 print('Running payload trigger loop...')
-                while not self.triggerPayload():
+                tries = TRIGGER_PAYLOAD_TRIES
+                while tries > 0 and not self.triggerPayload():
                     print('Trying again to trigger payload...')
-                if self.waitForData():
-                    self.dumpPayload('dumprom.bin')
-                    print('Maybe this is bootrom?')
+                    tries -= 1
+                if tries > 0:
+                    if self.waitForData():
+                        self.dumpPayload('dumprom.bin')
+                        print('Maybe this is bootrom?')
+                    else:
+                        print('Failed to see bootrom')
                 else:
-                    print('Failed to see bootrom')
+                    print('Failed to trigger payload')
         return False
 
 PetiteMort().start()
