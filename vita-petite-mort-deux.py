@@ -27,35 +27,41 @@ from chipwhisperer.capture.targets.simpleserial_readers.cwlite import SimpleSeri
 
 CW_SYSCLK_FREQ = 96000000
 VITA_CLK_FREQ = 12000000
-P1_MIN_OFFSET = 20
-P1_MAX_OFFSET = 1000
-P1_MIN_WIDTH = 55
+#P1_MIN_OFFSET = 575800
+#P1_MIN_OFFSET = 558646
+P1_MIN_OFFSET = 573800
+P1_MAX_OFFSET = 557600
+P1_MIN_WIDTH = 45
 P1_MAX_WIDTH = 55
-P1_OFFSET_STEP = 1
+P1_OFFSET_STEP = -1
 P1_WIDTH_STEP = 1
-P2_MIN_OFFSET = 40813
-P2_MAX_OFFSET = 40813
+P2_MIN_OFFSET = 40809
+P2_MAX_OFFSET = 40809
 P2_MIN_WIDTH = 52
 P2_MAX_WIDTH = 52
 P2_OFFSET_STEP = 1
 P2_WIDTH_STEP = 1
+SEEN_NOT_RESTART_MS = 60
 VITA_UART0_BAUD = 28985
 TIME_RESET_HOLD = 0
 TIME_POWER_HOLD = 5
-GLITCH_FIND_TIMEOUT = 10
-TRIGGER_PAYLOAD_TRIES = 10
+GLITCH_FIND_TIMEOUT = 2
+TRIGGER_PAYLOAD_TRIES = 1
 PAYLOAD_TIMEOUT = 100
 VERBOSE = 1
 
 class States(IntEnum):
     BOOT_STARTED = 0
-    READ_MBR = 1
-    READ_MBR_STATUS = 2
-    UNEXPECTED_READ = 3
-    UNEXPECTED_PACKET = 4
-    LOADING_PAYLOAD = 5
-    OVERFLOWED = 6
-    RESTARTED = 7
+    IDLE_STATE = 1
+    READ_MBR = 2
+    READ_MBR_STATUS = 3
+    UNEXPECTED_READ = 4
+    UNEXPECTED_PACKET = 5
+    LOADING_PAYLOAD = 6
+    OVERFLOWED = 7
+    RESTARTED = 8
+    EARLY_RESET = 9
+    NOTHING_SEEN = 10
 
 logging.basicConfig(level=logging.WARN)
 scope = cw.scope()
@@ -115,6 +121,11 @@ edgetrigger.setFilter(1)
 # init
 target.init()
 
+# csv
+open('glitch_out_deux.csv', 'w').close()
+csvf = open('glitch_out_deux.csv', 'ab')
+writer = csv.writer(csvf)
+
 class PetiteMort:
     queue = []
 
@@ -129,7 +140,7 @@ class PetiteMort:
             lines.append("%08x  %-*s  %s\n" % (offset + c, length*3, hex, printable))
         return ''.join(lines)
 
-    def triggerPayload(self):
+    def triggerPayload(self, aux1=0, aux2=0):
         for offset in xrange(P2_MIN_OFFSET, P2_MAX_OFFSET+1, P2_OFFSET_STEP):
             # set offset from trigger
             scope.glitch.ext_offset = offset
@@ -154,10 +165,27 @@ class PetiteMort:
                     if VERBOSE:
                         print(str(pkt))
 
+                reset_start = time.time()
                 scope.io.nrst = 'disabled'
+                timeout = 100
+                while mmc.count() == 0:
+                    timeout -= 1
+                    if timeout == 0:
+                        break
+                first_seen = time.time()
+                if timeout == 0:
+                    state = States.NOTHING_SEEN
+                    diff = 0
+                else:
+                    diff = (first_seen-reset_start)*1000
+                    timeout = GLITCH_FIND_TIMEOUT
+                    print('time until first packet in ms {}'.format(diff))
+                if diff > SEEN_NOT_RESTART_MS:
+                    state = States.EARLY_RESET
+                    timeout = -1
                 timestamp = 0
                 restarted = 0
-                reads = 0
+                seen = 0
                 while timeout > 0:
                     while mmc.count() > 0:
                         timeout = GLITCH_FIND_TIMEOUT
@@ -169,11 +197,13 @@ class PetiteMort:
                         last_cnt = pkt.num
                         print('[{:10.5f}ms] {}'.format(timestamp, str(pkt)))
                         if pkt.is_req:
+                            seen += 1
                             if pkt.cmd == MMCPacket.Cmd.GO_IDLE_STATE:
                                 restarted += 1
-                            if pkt.cmd == MMCPacket.Cmd.READ_SINGLE_BLOCK:
-                                reads += 1
                             if state == States.BOOT_STARTED:
+                                if pkt.cmd == MMCPacket.Cmd.GO_IDLE_STATE:
+                                    state = States.IDLE_STATE
+                            elif state == States.IDLE_STATE:
                                 if pkt.cmd == MMCPacket.Cmd.READ_SINGLE_BLOCK and pkt.content == 0x0:
                                     state = States.READ_MBR
                             elif state == States.READ_MBR:
@@ -206,9 +236,12 @@ class PetiteMort:
                         timeout -= 1
 
                 # for table display purposes
-                data = [offset, width, state, reads]
+                data = [aux1, aux2, offset, width, state, seen, diff]
                 print(data)
                 #glitch_display.add_data(data)
+                #if state != States.EARLY_RESET and state != States.BOOT_STARTED:
+                writer.writerow(data)
+                csvf.flush()
 
                 if state == States.OVERFLOWED:
                     return True
@@ -224,9 +257,9 @@ class PetiteMort:
                 timeout = PAYLOAD_TIMEOUT
                 dat = ser.read(count, 0)
                 self.queue.extend(dat)
-                if len(self.queue) >= 16:
-                    print(self.hexdump(self.queue[0:16], 0), end="")
-                    s = sum([ord(x) for x in self.queue[4:16]])
+                if len(self.queue) >= 32:
+                    print(self.hexdump(self.queue[0:32], 0), end="")
+                    s = sum([ord(x) for x in self.queue[4:32]])
                     if s == 0:
                         return False
                     else:
@@ -237,7 +270,8 @@ class PetiteMort:
             else:
                 time.sleep(0.1)
                 timeout -= 1
-        raise RuntimeError('Timed out waiting for data.')
+        #raise RuntimeError('Timed out waiting for data.')
+        return False
 
     def dumpPayload(self, path=None):
         f = None
@@ -247,9 +281,9 @@ class PetiteMort:
 
         timeout = PAYLOAD_TIMEOUT
         offset = 0
-        while offset < 0x1000:
+        while offset < 0x8000:
             count = ser.inWaiting()
-            while count > 0 and offset < 0x1000:
+            while count > 0 and offset < 0x8000:
                 timeout = PAYLOAD_TIMEOUT
                 dat = ser.read(count, 0)
                 self.queue.extend(dat)
@@ -293,12 +327,12 @@ class PetiteMort:
                 ser.flushInput()
                 print('Running payload trigger loop...')
                 tries = TRIGGER_PAYLOAD_TRIES
-                while tries > 0 and not self.triggerPayload():
+                while tries > 0 and not self.triggerPayload(offset, width):
                     print('Trying again to trigger payload...')
                     tries -= 1
                 if tries > 0:
                     if self.waitForData():
-                        self.dumpPayload('dumprom.bin')
+                        self.dumpPayload("dumprom-{:x}-{:x}.bin".format(offset, width))
                         print('Maybe this is bootrom?')
                     else:
                         print('Failed to see bootrom')
@@ -307,3 +341,4 @@ class PetiteMort:
         return False
 
 PetiteMort().start()
+csvf.close()
