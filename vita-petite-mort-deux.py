@@ -324,7 +324,7 @@ class PetiteMort:
                 scope.io.nrst = 'low'
                 scope.vddglitch.repeat = width
                 print('Clearing buffer...')
-                ser.flushInput()
+                ser.read(ser.inWaiting())
                 print('Running payload trigger loop...')
                 tries = TRIGGER_PAYLOAD_TRIES
                 while tries > 0 and not self.triggerPayload(offset, width):
