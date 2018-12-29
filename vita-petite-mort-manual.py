@@ -2,7 +2,7 @@
 ## 
 ## vita-petite-mort-manual.py -- run brom payloads
 ##
-## Copyright (C) 2016 Yifan Lu
+## Copyright (C) 2016 molecule
 ##
 ## This software may be modified and distributed under the terms
 ## of the MIT license.  See the LICENSE file for details.
